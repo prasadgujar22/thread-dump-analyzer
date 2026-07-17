@@ -16,6 +16,7 @@ import java.awt.event.*;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
+import java.util.stream.*;
 import java.util.List;
 
 import org.jfree.chart.*;
@@ -159,7 +160,7 @@ public class MainWindow extends JFrame {
         
         tabbedPane.removeAll();
         
-        // Overview tab with charts
+        // Overview tab with actionable summary
         tabbedPane.addTab("Overview", createOverviewPanel(dump));
         
         // Charts tab
@@ -170,9 +171,6 @@ public class MainWindow extends JFrame {
         
         // States tab
         tabbedPane.addTab("States", createStatesPanel(dump));
-        
-        // Long Running tab
-        tabbedPane.addTab("Long Running", createLongRunningPanel(dump));
         
         // Deadlocks tab
         if (!dump.getDeadlocks().isEmpty()) {
@@ -195,16 +193,9 @@ public class MainWindow extends JFrame {
         JPanel panel = new JPanel(new GridLayout(2, 2, 10, 10));
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         
-        // 1. Thread States Pie Chart
         panel.add(createThreadStatePieChart(dump));
-        
-        // 2. Stack Depth Distribution Pie Chart
         panel.add(createStackDepthPieChart(dump));
-        
-        // 3. Thread Name Groups Bar Chart
         panel.add(createThreadNameGroupsChart(dump));
-        
-        // 4. Pool Distribution Bar Chart
         panel.add(createPoolDistributionChart(dump));
         
         return panel;
@@ -290,7 +281,7 @@ public class MainWindow extends JFrame {
         JPanel panel = new JPanel(new BorderLayout(10, 10));
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         
-        // Info cards
+        // Info cards at top
         JPanel cardsPanel = new JPanel(new GridLayout(2, 3, 10, 10));
         cardsPanel.add(createCard("File", dump.getFileName()));
         cardsPanel.add(createCard("Server", dump.getServerType()));
@@ -302,10 +293,12 @@ public class MainWindow extends JFrame {
         
         panel.add(cardsPanel, BorderLayout.NORTH);
         
-        // Summary text
+        // Actionable summary text (no raw thread dump content)
         JTextArea summaryArea = new JTextArea(DumpAnalyzer.generateSummary(dump));
         summaryArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         summaryArea.setEditable(false);
+        summaryArea.setLineWrap(true);
+        summaryArea.setWrapStyleWord(true);
         panel.add(new JScrollPane(summaryArea), BorderLayout.CENTER);
         
         return panel;
@@ -335,7 +328,6 @@ public class MainWindow extends JFrame {
         table.setAutoCreateRowSorter(true);
         table.setRowHeight(25);
         
-        // Color code states
         table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             @Override
             public Component getTableCellRendererComponent(JTable table, Object value,
@@ -354,7 +346,6 @@ public class MainWindow extends JFrame {
         
         panel.add(new JScrollPane(table), BorderLayout.CENTER);
         
-        // Detail panel for selected thread
         JTextArea detailArea = new JTextArea(10, 50);
         detailArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
         detailArea.setEditable(false);
@@ -371,77 +362,11 @@ public class MainWindow extends JFrame {
         return panel;
     }
     
-    // ===== LONG RUNNING PANEL =====
-    private JPanel createLongRunningPanel(ThreadDump dump) {
-        JPanel panel = new JPanel(new BorderLayout(10, 10));
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        
-        // Show info about multi-dump requirement
-        JLabel infoLabel = new JLabel(
-            "Proper long-running detection requires 2+ dumps (5-10s apart). " +
-            "TID is used for identification. Threads must be RUNNABLE with same top frame in ALL dumps.");
-        infoLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-        panel.add(infoLabel, BorderLayout.NORTH);
-        
-        // Results table
-        String[] columns = {"TID", "Name", "State", "Pool", "Stack Depth", "Top Method"};
-        DefaultTableModel model = new DefaultTableModel(columns, 0) {
-            @Override public boolean isCellEditable(int row, int column) { return false; }
-        };
-        
-        // If we have multiple dumps loaded, run proper multi-dump detection
-        if (dumpListModel.size() >= 2) {
-            List<ThreadDump> allDumps = new ArrayList<>();
-            for (int i = 0; i < dumpListModel.size(); i++) {
-                allDumps.add(dumpListModel.getElementAt(i));
-            }
-            List<ThreadInfo> longRunning = DumpAnalyzer.findLongRunningThreads(allDumps);
-            for (ThreadInfo thread : longRunning) {
-                String topMethod = thread.getStackTrace().isEmpty() ? "N/A" :
-                    thread.getStackTrace().get(0).toString();
-                model.addRow(new Object[]{
-                    thread.getId(),
-                    thread.getName(),
-                    thread.getState().getLabel() + " (all dumps)",
-                    thread.getPoolName(),
-                    thread.getStackTrace().size(),
-                    topMethod
-                });
-            }
-            infoLabel.setText("Detected " + longRunning.size() + 
-                " long-running threads across " + allDumps.size() + " dumps (RUNNABLE + same top frame, TID-based).");
-        } else {
-            // Fallback: show deep stack threads for single dump
-            infoLabel.setText("Only 1 dump loaded. Showing deep stack threads (heuristic). Load 2+ dumps for proper detection.");
-            List<ThreadInfo> deepStacks = DumpAnalyzer.findLongRunningThreads(dump, 10);
-            for (ThreadInfo thread : deepStacks) {
-                String topMethod = thread.getStackTrace().isEmpty() ? "N/A" :
-                    thread.getStackTrace().get(0).toString();
-                model.addRow(new Object[]{
-                    thread.getId(),
-                    thread.getName(),
-                    thread.getState().getLabel(),
-                    thread.getPoolName(),
-                    thread.getStackTrace().size(),
-                    topMethod
-                });
-            }
-        }
-        
-        JTable table = new JTable(model);
-        table.setAutoCreateRowSorter(true);
-        table.setRowHeight(25);
-        panel.add(new JScrollPane(table), BorderLayout.CENTER);
-        
-        return panel;
-    }
-    
     // ===== STATES PANEL =====
     private JPanel createStatesPanel(ThreadDump dump) {
         JPanel panel = new JPanel(new GridLayout(1, 2, 10, 10));
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         
-        // State distribution table
         Map<ThreadState, Long> states = DumpAnalyzer.analyzeStates(dump);
         String[] cols = {"State", "Count", "Percentage"};
         DefaultTableModel model = new DefaultTableModel(cols, 0);
@@ -462,7 +387,6 @@ public class MainWindow extends JFrame {
         table.setRowHeight(28);
         panel.add(new JScrollPane(table));
         
-        // Pool distribution
         Map<String, Long> pools = dump.getThreadsByPool();
         String[] poolCols = {"Pool", "Thread Count"};
         DefaultTableModel poolModel = new DefaultTableModel(poolCols, 0);
@@ -535,7 +459,6 @@ public class MainWindow extends JFrame {
             }
             if (threads.size() > 5) tids.append("...");
             
-            // Shorten stack signature for display
             String sig = entry.getKey().split("\n")[0];
             if (sig.length() > 80) sig = sig.substring(0, 80) + "...";
             
@@ -587,6 +510,259 @@ public class MainWindow extends JFrame {
         }
     }
     
+    // ===== 2-DUMP COMPARISON WITH SIDE-BY-SIDE CHARTS =====
+    private void showComparisonResult(ComparisonResult result) {
+        JDialog dialog = new JDialog(this, "Comparison: " + result.getBaseline().getFileName() 
+            + " vs " + result.getCompareTo().getFileName(), true);
+        dialog.setSize(1500, 950);
+        dialog.setLocationRelativeTo(this);
+        
+        JTabbedPane tabs = new JTabbedPane();
+        
+        // Tab 1: Summary (actionable text, no raw dumps)
+        JTextArea summary = new JTextArea();
+        summary.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        summary.setEditable(false);
+        summary.setLineWrap(true);
+        summary.setWrapStyleWord(true);
+        
+        StringBuilder sb = new StringBuilder();
+        sb.append("COMPARATIVE ANALYSIS REPORT\n");
+        sb.append("============================\n\n");
+        sb.append("Baseline:  ").append(result.getBaseline().getFileName())
+          .append(" (").append(result.getBaseline().getThreads().size()).append(" threads)\n");
+        sb.append("Compare:   ").append(result.getCompareTo().getFileName())
+          .append(" (").append(result.getCompareTo().getThreads().size()).append(" threads)\n\n");
+        
+        sb.append("NEW THREADS: ").append(result.getNewThreads().size()).append("\n");
+        sb.append("REMOVED THREADS: ").append(result.getRemovedThreads().size()).append("\n");
+        long stateChanges = result.getChanges().stream()
+            .filter(c -> c.getType() == ComparisonResult.ChangeType.STATE_CHANGED).count();
+        sb.append("STATE CHANGES: ").append(stateChanges).append("\n\n");
+        
+        sb.append("STATE DELTA (Compare - Baseline):\n");
+        result.getStateDelta().forEach((state, delta) -> {
+            if (delta != 0) {
+                sb.append("  ").append(state.getLabel()).append(": ")
+                  .append(delta > 0 ? "+" : "").append(delta).append("\n");
+            }
+        });
+        
+        if (!result.getNewThreads().isEmpty()) {
+            sb.append("\nNEW THREADS:\n");
+            result.getNewThreads().forEach(t -> sb.append("  + ").append(t).append("\n"));
+        }
+        
+        if (!result.getRemovedThreads().isEmpty()) {
+            sb.append("\nREMOVED THREADS:\n");
+            result.getRemovedThreads().forEach(t -> sb.append("  - ").append(t).append("\n"));
+        }
+        
+        // Add state change details
+        List<ComparisonResult.ThreadChange> stateChangeList = result.getChanges().stream()
+            .filter(c -> c.getType() == ComparisonResult.ChangeType.STATE_CHANGED)
+            .collect(Collectors.toList());
+        if (!stateChangeList.isEmpty()) {
+            sb.append("\nTHREADS THAT CHANGED STATE:\n");
+            stateChangeList.forEach(c -> {
+                sb.append("  ").append(c.getThreadName())
+                  .append(": ").append(c.getOldState().getLabel())
+                  .append(" -> ").append(c.getNewState().getLabel()).append("\n");
+            });
+        }
+        
+        summary.setText(sb.toString());
+        tabs.addTab("Summary", new JScrollPane(summary));
+        
+        // Tab 2: Side-by-Side Charts
+        tabs.addTab("Side-by-Side Charts", createSideBySideChartsPanel(result));
+        
+        // Tab 3: Long Running (from these 2 dumps)
+        tabs.addTab("Long Running", createLongRunningForTwoDumpsPanel(result.getBaseline(), result.getCompareTo()));
+        
+        // Tab 4: State Delta Table
+        String[] deltaCols = {"State", "Baseline", "Compare", "Delta"};
+        DefaultTableModel deltaModel = new DefaultTableModel(deltaCols, 0);
+        Map<ThreadState, Long> baseStates = DumpAnalyzer.analyzeStates(result.getBaseline());
+        Map<ThreadState, Long> cmpStates = DumpAnalyzer.analyzeStates(result.getCompareTo());
+        for (ThreadState state : ThreadState.values()) {
+            long b = baseStates.getOrDefault(state, 0L);
+            long c = cmpStates.getOrDefault(state, 0L);
+            long d = c - b;
+            if (b > 0 || c > 0) {
+                deltaModel.addRow(new Object[]{state.getLabel(), b, c, (d > 0 ? "+" : "") + d});
+            }
+        }
+        tabs.addTab("State Delta", new JScrollPane(new JTable(deltaModel)));
+        
+        dialog.add(tabs);
+        dialog.setVisible(true);
+    }
+    
+    // ===== SIDE-BY-SIDE CHARTS FOR 2-DUMP COMPARISON =====
+    private JPanel createSideBySideChartsPanel(ComparisonResult result) {
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        
+        JLabel title = new JLabel("Side-by-Side Comparison: " + result.getBaseline().getFileName() 
+            + " vs " + result.getCompareTo().getFileName());
+        title.setFont(new Font(Font.DIALOG, Font.BOLD, 14));
+        panel.add(title, BorderLayout.NORTH);
+        
+        JPanel chartsPanel = new JPanel(new GridLayout(2, 2, 15, 15));
+        
+        // Chart 1: Comparative Thread States (grouped bar)
+        chartsPanel.add(createComparativeStateChart(result));
+        
+        // Chart 2: Comparative Pool Distribution
+        chartsPanel.add(createComparativePoolChart(result));
+        
+        // Chart 3: Comparative Stack Depth
+        chartsPanel.add(createComparativeStackDepthChart(result));
+        
+        // Chart 4: Comparative Name Groups
+        chartsPanel.add(createComparativeNameGroupsChart(result));
+        
+        panel.add(chartsPanel, BorderLayout.CENTER);
+        return panel;
+    }
+    
+    private JPanel createComparativeStateChart(ComparisonResult result) {
+        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+        Map<ThreadState, Long> baseStates = DumpAnalyzer.analyzeStates(result.getBaseline());
+        Map<ThreadState, Long> cmpStates = DumpAnalyzer.analyzeStates(result.getCompareTo());
+        
+        for (ThreadState state : ThreadState.values()) {
+            long b = baseStates.getOrDefault(state, 0L);
+            long c = cmpStates.getOrDefault(state, 0L);
+            if (b > 0 || c > 0) {
+                dataset.addValue(b, "Baseline", state.getLabel());
+                dataset.addValue(c, "Compare", state.getLabel());
+            }
+        }
+        
+        JFreeChart chart = ChartFactory.createBarChart(
+            "Thread States Comparison", "State", "Count", dataset,
+            PlotOrientation.VERTICAL, true, true, false);
+        
+        ChartPanel chartPanel = new ChartPanel(chart);
+        chartPanel.setPreferredSize(new Dimension(500, 300));
+        return chartPanel;
+    }
+    
+    private JPanel createComparativePoolChart(ComparisonResult result) {
+        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+        Map<String, Long> basePools = result.getBaseline().getThreadsByPool();
+        Map<String, Long> cmpPools = result.getCompareTo().getThreadsByPool();
+        
+        Set<String> allPools = new HashSet<>();
+        allPools.addAll(basePools.keySet());
+        allPools.addAll(cmpPools.keySet());
+        
+        for (String pool : allPools) {
+            long b = basePools.getOrDefault(pool, 0L);
+            long c = cmpPools.getOrDefault(pool, 0L);
+            dataset.addValue(b, "Baseline", pool);
+            dataset.addValue(c, "Compare", pool);
+        }
+        
+        JFreeChart chart = ChartFactory.createBarChart(
+            "Pool Distribution Comparison", "Pool", "Count", dataset,
+            PlotOrientation.HORIZONTAL, true, true, false);
+        
+        ChartPanel chartPanel = new ChartPanel(chart);
+        chartPanel.setPreferredSize(new Dimension(500, 300));
+        return chartPanel;
+    }
+    
+    private JPanel createComparativeStackDepthChart(ComparisonResult result) {
+        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+        Map<String, Long> baseDist = DumpAnalyzer.analyzeStackDepthDistribution(result.getBaseline());
+        Map<String, Long> cmpDist = DumpAnalyzer.analyzeStackDepthDistribution(result.getCompareTo());
+        
+        for (String range : baseDist.keySet()) {
+            dataset.addValue(baseDist.get(range), "Baseline", range);
+            dataset.addValue(cmpDist.getOrDefault(range, 0L), "Compare", range);
+        }
+        
+        JFreeChart chart = ChartFactory.createBarChart(
+            "Stack Depth Comparison", "Depth Range", "Threads", dataset,
+            PlotOrientation.VERTICAL, true, true, false);
+        
+        ChartPanel chartPanel = new ChartPanel(chart);
+        chartPanel.setPreferredSize(new Dimension(500, 300));
+        return chartPanel;
+    }
+    
+    private JPanel createComparativeNameGroupsChart(ComparisonResult result) {
+        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+        Map<String, Long> baseGroups = DumpAnalyzer.analyzeThreadNameGroups(result.getBaseline());
+        Map<String, Long> cmpGroups = DumpAnalyzer.analyzeThreadNameGroups(result.getCompareTo());
+        
+        Set<String> allGroups = new HashSet<>();
+        allGroups.addAll(baseGroups.keySet());
+        allGroups.addAll(cmpGroups.keySet());
+        
+        for (String group : allGroups) {
+            dataset.addValue(baseGroups.getOrDefault(group, 0L), "Baseline", group);
+            dataset.addValue(cmpGroups.getOrDefault(group, 0L), "Compare", group);
+        }
+        
+        JFreeChart chart = ChartFactory.createBarChart(
+            "Thread Groups Comparison", "Group", "Count", dataset,
+            PlotOrientation.HORIZONTAL, true, true, false);
+        
+        ChartPanel chartPanel = new ChartPanel(chart);
+        chartPanel.setPreferredSize(new Dimension(500, 300));
+        return chartPanel;
+    }
+    
+    // ===== LONG RUNNING FOR 2 DUMPS =====
+    private JPanel createLongRunningForTwoDumpsPanel(ThreadDump base, ThreadDump compare) {
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        
+        List<ThreadDump> twoDumps = Arrays.asList(base, compare);
+        List<ThreadInfo> longRunning = DumpAnalyzer.findLongRunningThreads(twoDumps);
+        
+        JLabel infoLabel = new JLabel(
+            "Long-running threads: RUNNABLE in BOTH dumps with identical top stack frame (TID-based). " +
+            "Detected: " + longRunning.size());
+        infoLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        panel.add(infoLabel, BorderLayout.NORTH);
+        
+        String[] columns = {"TID", "Name", "Pool", "Top Method", "Stack Depth"};
+        DefaultTableModel model = new DefaultTableModel(columns, 0) {
+            @Override public boolean isCellEditable(int row, int column) { return false; }
+        };
+        
+        for (ThreadInfo thread : longRunning) {
+            String topMethod = thread.getStackTrace().isEmpty() ? "N/A" :
+                thread.getStackTrace().get(0).toString();
+            model.addRow(new Object[]{
+                thread.getId(),
+                thread.getName(),
+                thread.getPoolName(),
+                topMethod,
+                thread.getStackTrace().size()
+            });
+        }
+        
+        JTable table = new JTable(model);
+        table.setAutoCreateRowSorter(true);
+        table.setRowHeight(25);
+        panel.add(new JScrollPane(table), BorderLayout.CENTER);
+        
+        if (longRunning.isEmpty()) {
+            JLabel noneLabel = new JLabel("No long-running threads detected between these two dumps.", SwingConstants.CENTER);
+            noneLabel.setFont(new Font(Font.DIALOG, Font.ITALIC, 14));
+            panel.add(noneLabel, BorderLayout.SOUTH);
+        }
+        
+        return panel;
+    }
+    
+    // ===== MULTI-COMPARE DIALOG =====
     private void showMultiCompareDialog() {
         if (dumpListModel.size() < 3) {
             JOptionPane.showMessageDialog(this, 
@@ -626,64 +802,19 @@ public class MainWindow extends JFrame {
         }
     }
     
-    private void showComparisonResult(ComparisonResult result) {
-        JDialog dialog = new JDialog(this, "Comparison Results", true);
-        dialog.setSize(900, 600);
-        dialog.setLocationRelativeTo(this);
-        
-        JPanel panel = new JPanel(new BorderLayout(10, 10));
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        
-        JTextArea summary = new JTextArea();
-        summary.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        summary.setEditable(false);
-        
-        StringBuilder sb = new StringBuilder();
-        sb.append("Comparison: ").append(result.getBaseline().getFileName())
-          .append(" vs ").append(result.getCompareTo().getFileName()).append("\n\n");
-        
-        sb.append("New Threads: ").append(result.getNewThreads().size()).append("\n");
-        sb.append("Removed Threads: ").append(result.getRemovedThreads().size()).append("\n");
-        sb.append("State Changes: ").append(
-            result.getChanges().stream().filter(c -> c.getType() == ComparisonResult.ChangeType.STATE_CHANGED).count()
-        ).append("\n\n");
-        
-        sb.append("State Delta:\n");
-        result.getStateDelta().forEach((state, delta) -> {
-            if (delta != 0) {
-                sb.append("  ").append(state.getLabel()).append(": ")
-                  .append(delta > 0 ? "+" : "").append(delta).append("\n");
-            }
-        });
-        
-        if (!result.getNewThreads().isEmpty()) {
-            sb.append("\nNew Threads:\n");
-            result.getNewThreads().forEach(t -> sb.append("  + ").append(t).append("\n"));
-        }
-        
-        if (!result.getRemovedThreads().isEmpty()) {
-            sb.append("\nRemoved Threads:\n");
-            result.getRemovedThreads().forEach(t -> sb.append("  - ").append(t).append("\n"));
-        }
-        
-        summary.setText(sb.toString());
-        panel.add(new JScrollPane(summary), BorderLayout.CENTER);
-        
-        dialog.add(panel);
-        dialog.setVisible(true);
-    }
-    
     private void showMultiComparisonResult(MultiComparisonResult result) {
         JDialog dialog = new JDialog(this, "Multi-Dump Comparison Results", true);
-        dialog.setSize(1200, 800);
+        dialog.setSize(1400, 900);
         dialog.setLocationRelativeTo(this);
         
         JTabbedPane tabs = new JTabbedPane();
         
-        // Summary tab
+        // Summary tab (actionable report, no raw dumps)
         JTextArea summary = new JTextArea();
         summary.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         summary.setEditable(false);
+        summary.setLineWrap(true);
+        summary.setWrapStyleWord(true);
         summary.setText(DumpAnalyzer.generateMultiSummary(result));
         tabs.addTab("Summary", new JScrollPane(summary));
         
@@ -736,7 +867,7 @@ public class MainWindow extends JFrame {
             List<Long> counts = entry.getValue();
             for (int i = 0; i < counts.size(); i++) {
                 dataset.addValue(counts.get(i), state.getLabel(), 
-                    "Dump " + (i + 1) + "\n" + dumps.get(i).getFileName());
+                    "Dump " + (i + 1));
             }
         }
         
@@ -745,7 +876,7 @@ public class MainWindow extends JFrame {
             PlotOrientation.VERTICAL, true, true, false);
         
         ChartPanel chartPanel = new ChartPanel(chart);
-        chartPanel.setPreferredSize(new Dimension(800, 500));
+        chartPanel.setPreferredSize(new Dimension(900, 550));
         return chartPanel;
     }
     
@@ -760,7 +891,7 @@ public class MainWindow extends JFrame {
     private void exportReport() {
         if (currentDump == null) return;
         JFileChooser chooser = new JFileChooser();
-        chooser.setSelectedFile(new File("report.txt"));
+        chooser.setSelectedFile(new File("thread-dump-report.txt"));
         if (chooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
             try {
                 Files.write(chooser.getSelectedFile().toPath(), 
@@ -788,8 +919,10 @@ public class MainWindow extends JFrame {
     
     private void showAbout() {
         JOptionPane.showMessageDialog(this,
-            "Sherlock Thread Dump Analyzer v2.0\n" +
+            "Sherlock Thread Dump Analyzer v2.1\n" +
             "TID-based cross-dump comparison\n" +
+            "Side-by-side comparative charts\n" +
+            "Actionable analysis reports (no raw dump text)\n" +
             "Charts: Thread States, Stack Depth, Name Groups, Pool Distribution\n" +
             "Supports: HotSpot JDK 8/11/21, WebLogic, WebSphere, Tomcat\n" +
             "Built with FlatLaf + JFreeChart + Swing",

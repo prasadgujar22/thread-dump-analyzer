@@ -246,7 +246,7 @@ public class DumpAnalyzer {
         return distribution;
     }
     
-    // Thread name group analysis (e.g., "http-nio-", "pool-", "GC")
+    // Thread name group analysis (e.g. "http-nio-", "pool-", "GC")
     public static Map<String, Long> analyzeThreadNameGroups(ThreadDump dump) {
         Map<String, Long> groups = new HashMap<>();
         for (ThreadInfo t : dump.getThreads()) {
@@ -382,58 +382,204 @@ public class DumpAnalyzer {
                                     newThreads, removedThreads);
     }
     
+    // ===== ACTIONABLE SUMMARY & REPORT =====
+    
     public static String generateSummary(ThreadDump dump) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Thread Dump Analysis Summary\n");
+        sb.append("THREAD DUMP ANALYSIS REPORT\n");
         sb.append("============================\n\n");
-        sb.append("File: ").append(dump.getFileName()).append("\n");
-        sb.append("Server: ").append(dump.getServerType()).append("\n");
+        
+        sb.append("SOURCE: ").append(dump.getFileName()).append("\n");
+        sb.append("SERVER: ").append(dump.getServerType()).append("\n");
         sb.append("JVM: ").append(dump.getJvmVersion()).append("\n");
-        sb.append("Total Threads: ").append(dump.getThreads().size()).append("\n\n");
+        sb.append("TOTAL THREADS: ").append(dump.getThreads().size()).append("\n\n");
         
-        sb.append("Thread States:\n");
+        // --- KEY FINDINGS ---
+        sb.append("KEY FINDINGS\n");
+        sb.append("------------\n");
+        
         Map<ThreadState, Long> states = analyzeStates(dump);
-        states.forEach((state, count) -> 
-            sb.append("  ").append(state.getIcon()).append(" ")
-              .append(state.getLabel()).append(": ").append(count).append("\n"));
+        long blockedCount = states.getOrDefault(ThreadState.BLOCKED, 0L);
+        long waitingCount = states.getOrDefault(ThreadState.WAITING, 0L) 
+                          + states.getOrDefault(ThreadState.TIMED_WAITING, 0L);
+        long runnableCount = states.getOrDefault(ThreadState.RUNNABLE, 0L);
+        long total = dump.getThreads().size();
         
-        if (!dump.getDeadlocks().isEmpty()) {
-            sb.append("\nDEADLOCKS DETECTED: ").append(dump.getDeadlocks().size()).append("\n");
+        sb.append("* Thread State Distribution:\n");
+        for (ThreadState state : ThreadState.values()) {
+            long count = states.getOrDefault(state, 0L);
+            if (count > 0) {
+                double pct = (count * 100.0) / total;
+                sb.append(String.format("  %-15s: %3d threads (%5.1f%%)\n", 
+                    state.getLabel(), count, pct));
+            }
         }
         
-        sb.append("\nTop Pools:\n");
-        dump.getThreadsByPool().entrySet().stream()
+        if (blockedCount > 0) {
+            sb.append("\n  WARNING: ").append(blockedCount).append(" thread(s) are BLOCKED.\n");
+            sb.append("  This may indicate lock contention or deadlocks.\n");
+        }
+        
+        if (waitingCount > total * 0.5) {
+            sb.append("\n  NOTE: Over 50% of threads are in WAITING/TIMED_WAITING state.\n");
+            sb.append("  This is typical for idle thread pools but may indicate I/O bottlenecks.\n");
+        }
+        
+        if (!dump.getDeadlocks().isEmpty()) {
+            sb.append("\n  CRITICAL: ").append(dump.getDeadlocks().size())
+              .append(" DEADLOCK(S) DETECTED.\n");
+            for (DeadlockInfo dl : dump.getDeadlocks()) {
+                sb.append("  Involved: ").append(String.join(", ", dl.getInvolvedThreads())).append("\n");
+            }
+        }
+        
+        // --- HOT METHODS ---
+        sb.append("\n\nHOT METHODS (Top 10)\n");
+        sb.append("--------------------\n");
+        List<String> hotMethods = detectHotMethods(dump, 10);
+        if (hotMethods.isEmpty()) {
+            sb.append("  No significant hotspots detected.\n");
+        } else {
+            for (String method : hotMethods) {
+                sb.append("  ").append(method).append("\n");
+            }
+        }
+        
+        // --- POOL ANALYSIS ---
+        sb.append("\n\nPOOL DISTRIBUTION (Top 5)\n");
+        sb.append("-------------------------\n");
+        Map<String, Long> pools = dump.getThreadsByPool();
+        pools.entrySet().stream()
             .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
             .limit(5)
-            .forEach(e -> sb.append("  ").append(e.getKey()).append(": ")
+            .forEach(e -> sb.append("  ")
+                .append(e.getKey()).append(": ")
                 .append(e.getValue()).append(" threads\n"));
+        
+        // --- IDENTICAL STACKS ---
+        Map<String, List<ThreadInfo>> identical = findIdenticalStacks(dump);
+        if (!identical.isEmpty()) {
+            int totalDuplicateThreads = identical.values().stream().mapToInt(List::size).sum();
+            sb.append("\n\nIDENTICAL STACKS\n");
+            sb.append("----------------\n");
+            sb.append("  ").append(identical.size()).append(" unique stack signatures shared by ")
+              .append(totalDuplicateThreads).append(" threads.\n");
+            sb.append("  This indicates thread pool contention or saturation.\n");
+            identical.entrySet().stream()
+                .sorted((a, b) -> Integer.compare(b.getValue().size(), a.getValue().size()))
+                .limit(3)
+                .forEach(e -> {
+                    String sig = e.getKey().split("\n")[0];
+                    sb.append("  [").append(e.getValue().size()).append(" threads] ")
+                      .append(sig).append("\n");
+                });
+        }
+        
+        // --- STACK DEPTH ANALYSIS ---
+        sb.append("\n\nSTACK DEPTH DISTRIBUTION\n");
+        sb.append("------------------------\n");
+        Map<String, Long> depthDist = analyzeStackDepthDistribution(dump);
+        depthDist.forEach((range, count) -> {
+            if (count > 0) {
+                sb.append(String.format("  %-15s: %3d threads\n", range, count));
+            }
+        });
+        
+        // --- RECOMMENDATIONS ---
+        sb.append("\n\nRECOMMENDATIONS\n");
+        sb.append("---------------\n");
+        
+        if (!dump.getDeadlocks().isEmpty()) {
+            sb.append("[CRITICAL] Resolve deadlocks immediately. Review lock ordering.\n");
+        }
+        if (blockedCount > 0) {
+            sb.append("[HIGH] Investigate BLOCKED threads. Check for synchronized blocks/monitors.\n");
+        }
+        if (!identical.isEmpty() && identical.values().stream().anyMatch(l -> l.size() > 5)) {
+            sb.append("[MEDIUM] Large groups of identical stacks detected. Consider increasing pool size.\n");
+        }
+        if (runnableCount > total * 0.7) {
+            sb.append("[MEDIUM] High percentage of RUNNABLE threads. May indicate CPU saturation.\n");
+        }
+        if (waitingCount > 0 && waitingCount == total) {
+            sb.append("[INFO] All threads are waiting. System is likely idle or I/O bound.\n");
+        }
+        if (sb.toString().endsWith("---------------\n")) {
+            sb.append("No immediate issues detected. Thread distribution appears normal.\n");
+        }
         
         return sb.toString();
     }
     
     public static String generateMultiSummary(MultiComparisonResult result) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Multi-Dump Comparison Summary\n");
-        sb.append("=============================\n\n");
-        sb.append("Dumps compared: ").append(result.getDumps().size()).append("\n\n");
+        sb.append("MULTI-DUMP COMPARISON REPORT\n");
+        sb.append("============================\n\n");
+        sb.append("Dumps analyzed: ").append(result.getDumps().size()).append("\n");
+        for (int i = 0; i < result.getDumps().size(); i++) {
+            ThreadDump d = result.getDumps().get(i);
+            sb.append("  [").append(i + 1).append("] ")
+              .append(d.getFileName()).append(" (").append(d.getThreads().size()).append(" threads)\n");
+        }
+        sb.append("\n");
         
-        sb.append("Persistent threads (present in ALL dumps, any state): ")
+        // Key findings
+        sb.append("KEY FINDINGS\n");
+        sb.append("------------\n");
+        sb.append("* Persistent threads (present in ALL dumps): ")
           .append(result.getPersistentThreads().size()).append("\n");
-        sb.append("Long-running threads (RUNNABLE + same top frame in ALL dumps): ")
+        sb.append("* Long-running threads (RUNNABLE + same frame in ALL dumps): ")
           .append(result.getLongRunningThreads().size()).append("\n");
-        sb.append("State transitions detected: ")
+        sb.append("* State transitions detected: ")
           .append(result.getStateTransitions().size()).append("\n\n");
         
+        if (!result.getLongRunningThreads().isEmpty()) {
+            sb.append("[CRITICAL] Long-running threads detected. These threads have been\n");
+            sb.append("RUNNABLE at the same code location across ALL dumps.\n");
+            sb.append("This strongly suggests CPU-bound infinite loops or stuck computation.\n\n");
+            for (ThreadInfo t : result.getLongRunningThreads()) {
+                sb.append("  TID=").append(t.getId()).append(" ").append(t.getName()).append("\n");
+                if (!t.getStackTrace().isEmpty()) {
+                    sb.append("    at ").append(t.getStackTrace().get(0)).append("\n");
+                }
+            }
+            sb.append("\n");
+        }
+        
+        if (!result.getStateTransitions().isEmpty()) {
+            sb.append("* Threads that changed state between dumps:\n");
+            Map<String, Long> transitionSummary = new HashMap<>();
+            for (ThreadStateTransition t : result.getStateTransitions()) {
+                String key = t.getFromState().getLabel() + " -> " + t.getToState().getLabel();
+                transitionSummary.merge(key, 1L, Long::sum);
+            }
+            transitionSummary.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .forEach(e -> sb.append("    ").append(e.getKey()).append(": ").append(e.getValue()).append("\n"));
+            sb.append("\n");
+        }
+        
+        sb.append("PAIRWISE COMPARISON SUMMARY\n");
+        sb.append("---------------------------\n");
         for (int i = 0; i < result.getPairwiseResults().size(); i++) {
             ComparisonResult cr = result.getPairwiseResults().get(i);
-            sb.append("Comparison ").append(i + 1).append(": ")
+            sb.append("[").append(i + 1).append("] ")
               .append(cr.getBaseline().getFileName())
               .append(" -> ").append(cr.getCompareTo().getFileName()).append("\n");
-            sb.append("  New threads: ").append(cr.getNewThreads().size()).append("\n");
-            sb.append("  Removed threads: ").append(cr.getRemovedThreads().size()).append("\n");
-            sb.append("  State changes: ").append(
-                cr.getChanges().stream().filter(c -> c.getType() == ComparisonResult.ChangeType.STATE_CHANGED).count()
-            ).append("\n\n");
+            sb.append("    New threads: ").append(cr.getNewThreads().size()).append("\n");
+            sb.append("    Removed threads: ").append(cr.getRemovedThreads().size()).append("\n");
+            long stateChanges = cr.getChanges().stream()
+                .filter(c -> c.getType() == ComparisonResult.ChangeType.STATE_CHANGED).count();
+            sb.append("    State changes: ").append(stateChanges).append("\n");
+            
+            // Show significant state deltas
+            cr.getStateDelta().forEach((state, delta) -> {
+                if (delta != 0) {
+                    sb.append("    ").append(state.getLabel()).append(": ")
+                      .append(delta > 0 ? "+" : "").append(delta).append("\n");
+                }
+            });
+            sb.append("\n");
         }
         
         return sb.toString();

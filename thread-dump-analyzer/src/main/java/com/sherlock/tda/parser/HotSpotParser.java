@@ -134,9 +134,14 @@ public class HotSpotParser implements ThreadDumpParser {
     }
 
     private String extractJvmVersion(String content) {
-        Pattern p = Pattern.compile("Full thread dump (Java HotSpot\\(TM\\) [^,]+)");
+        // Match the Full thread dump line and capture only the JVM version part
+        // The version is on the same line, so we stop at newline
+        Pattern p = Pattern.compile("Full thread dump (Java HotSpot\\(TM\\) .+?)(?:\\n|$)");
         Matcher m = p.matcher(content);
-        return m.find() ? m.group(1) : "Unknown JVM";
+        if (m.find()) {
+            return m.group(1).trim();
+        }
+        return "Unknown JVM";
     }
 
     private String detectPoolName(String threadName) {
