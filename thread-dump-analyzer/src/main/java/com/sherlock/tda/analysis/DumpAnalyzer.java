@@ -205,6 +205,58 @@ public class DumpAnalyzer {
             .collect(Collectors.toList());
     }
     
+    // Validate that dumps are at least 20 seconds apart for meaningful comparison
+    public static String validateDumpTiming(List<ThreadDump> dumps) {
+        if (dumps == null || dumps.size() < 2) return "";
+        
+        List<String> warnings = new ArrayList<>();
+        for (int i = 1; i < dumps.size(); i++) {
+            java.time.LocalDateTime t1 = dumps.get(i - 1).getTimestamp();
+            java.time.LocalDateTime t2 = dumps.get(i).getTimestamp();
+            if (t1 != null && t2 != null) {
+                long secondsApart = java.time.Duration.between(t1, t2).getSeconds();
+                if (secondsApart >= 0 && secondsApart < 20) {
+                    warnings.add(String.format(
+                        "Dump [%d] (%s) and Dump [%d] (%s) are only %d seconds apart. " +
+                        "For reliable long-running thread detection, dumps should be taken at least 20 seconds apart.",
+                        i, dumps.get(i - 1).getFileName(),
+                        i + 1, dumps.get(i).getFileName(),
+                        secondsApart));
+                } else if (secondsApart < 0) {
+                    // Out of order - warn
+                    warnings.add(String.format(
+                        "Dump [%d] (%s) appears to be taken AFTER Dump [%d] (%s). Dumps may be out of order.",
+                        i + 1, dumps.get(i).getFileName(),
+                        i, dumps.get(i - 1).getFileName()));
+                }
+            }
+        }
+        
+        if (warnings.isEmpty()) return "";
+        
+        StringBuilder sb = new StringBuilder();
+        sb.append("TIMING VALIDATION WARNINGS\n");
+        sb.append("==========================\n\n");
+        for (String w : warnings) {
+            sb.append("⚠ ").append(w).append("\n\n");
+        }
+        sb.append("Recommendation: For accurate long-running thread detection, capture dumps "
+            + "at least 20 seconds apart to distinguish between active work and transient states.\n");
+        return sb.toString();
+    }
+    
+    // Validate timing for two dumps
+    public static String validateDumpTiming(ThreadDump a, ThreadDump b) {
+        if (a == null || b == null || a.getTimestamp() == null || b.getTimestamp() == null) return "";
+        long secondsApart = Math.abs(java.time.Duration.between(a.getTimestamp(), b.getTimestamp()).getSeconds());
+        if (secondsApart < 20) {
+            return String.format(
+                "WARNING: Dumps are only %d seconds apart. For reliable long-running thread detection, "
+                + "thread dumps should be taken at least 20 seconds apart.\n\n", secondsApart);
+        }
+        return "";
+    }
+    
     public static Map<String, List<ThreadInfo>> groupByPool(ThreadDump dump) {
         return dump.getThreads().stream()
             .collect(Collectors.groupingBy(ThreadInfo::getPoolName));

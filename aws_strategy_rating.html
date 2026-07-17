@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #f5f5f5;
+    padding: 40px;
+    margin: 0;
+  }
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    padding: 30px;
+  }
+  h1 {
+    text-align: center;
+    color: #1a1a1a;
+    font-size: 22px;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #666;
+    font-size: 14px;
+    margin-bottom: 25px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  th {
+    background: #2c3e50;
+    color: white;
+    padding: 14px 16px;
+    text-align: left;
+    font-weight: 600;
+  }
+  th.rating-col {
+    text-align: center;
+    width: 100px;
+  }
+  td {
+    padding: 14px 16px;
+    border-bottom: 1px solid #e8e8e8;
+    vertical-align: top;
+  }
+  td.rating {
+    text-align: center;
+    font-weight: 700;
+    font-size: 18px;
+  }
+  .rating-1 { color: #c0392b; }
+  .rating-2 { color: #e74c3c; }
+  .rating-3 { color: #e67e22; }
+  .rating-4 { color: #f39c12; }
+  .rating-5 { color: #f1c40f; }
+  tr:hover {
+    background: #f8f9fa;
+  }
+  .overall {
+    margin-top: 25px;
+    text-align: center;
+    padding: 20px;
+    background: #2c3e50;
+    color: white;
+    border-radius: 8px;
+  }
+  .overall-label {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+    opacity: 0.8;
+  }
+  .overall-score {
+    font-size: 42px;
+    font-weight: 800;
+    color: #e74c3c;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Critical Assessment: 100% AWS Strategy</h1>
+  <div class="subtitle">Regulated Bank Infrastructure Rating</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Dimension</th>
+        <th class="rating-col">Rating /10</th>
+        <th>Critical Justification</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Strategic Vision</strong></td>
+        <td class="rating rating-3">3</td>
+        <td>"100% AWS" is vendor dogma, not strategy. Concedes architectural control to a single commercial entity. No systemically important bank operates this way.</td>
+      </tr>
+      <tr>
+        <td><strong>Regulatory Feasibility</strong></td>
+        <td class="rating rating-2">2</td>
+        <td>RBI, ECB, Fed classify single-vendor concentration as systemic risk. Data localization and jurisdiction conflicts make full compliance nearly impossible.</td>
+      </tr>
+      <tr>
+        <td><strong>Operational Resilience</strong></td>
+        <td class="rating rating-2">2</td>
+        <td>Multi-region within AWS is redundancy inside one control plane. When IAM, Route 53, or global console fails, every region fails simultaneously. No hedge.</td>
+      </tr>
+      <tr>
+        <td><strong>Core Banking Suitability</strong></td>
+        <td class="rating rating-1">1</td>
+        <td>Core systems require sub-millisecond latency and ACID consistency. Cloud adds cost, complexity, and failure modes with zero benefit for batch ledger processing.</td>
+      </tr>
+      <tr>
+        <td><strong>Cost Efficiency</strong></td>
+        <td class="rating rating-2">2</td>
+        <td>Predictable 24/7 workloads cost 20–40% more in cloud. Data egress penalizes integration. If DR on-prem is maintained (regulatory necessity), the bank pays twice.</td>
+      </tr>
+      <tr>
+        <td><strong>Vendor Lock-in</strong></td>
+        <td class="rating rating-1">1</td>
+        <td>DynamoDB, Lambda, Aurora, ECS Fargate create architectural entanglement. Re-platforming requires 5–7 years and complete rewrite. The bank cannot leave.</td>
+      </tr>
+      <tr>
+        <td><strong>Innovation Velocity</strong></td>
+        <td class="rating rating-5">5</td>
+        <td>Legitimate strength — AI/ML and digital product acceleration. But diluted by 2,000 annual AWS feature releases forcing continuous, expensive refactoring.</td>
+      </tr>
+      <tr>
+        <td><strong>Talent & Skills</strong></td>
+        <td class="rating rating-4">4</td>
+        <td>Junior AWS talent is abundant. Senior architects who understand banking regulation and core systems are rare, expensive, and easily poached.</td>
+      </tr>
+      <tr>
+        <td><strong>Risk-Adjusted Return</strong></td>
+        <td class="rating rating-2">2</td>
+        <td>Asymmetric downside. Best case: faster product launches. Worst case: total operational paralysis, regulatory sanction, or franchise-threatening costs.</td>
+      </tr>
+      <tr>
+        <td><strong>Long-Term Sustainability</strong></td>
+        <td class="rating rating-2">2</td>
+        <td>AWS controls pricing unilaterally. Geopolitical risk, service deprecation, and sovereignty mandates threaten the model. The bank becomes an AWS reseller.</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="overall">
+    <div class="overall-label">Overall Critical Rating</div>
+    <div class="overall-score">2 / 10</div>
+  </div>
+</div>
+</body>
+</html>

@@ -527,6 +527,13 @@ public class MainWindow extends JFrame {
         summary.setWrapStyleWord(true);
         
         StringBuilder sb = new StringBuilder();
+        
+        // Timing validation
+        String timingWarning = DumpAnalyzer.validateDumpTiming(result.getBaseline(), result.getCompareTo());
+        if (!timingWarning.isEmpty()) {
+            sb.append(timingWarning).append("\n");
+        }
+        
         sb.append("COMPARATIVE ANALYSIS REPORT\n");
         sb.append("============================\n\n");
         sb.append("Baseline:  ").append(result.getBaseline().getFileName())
@@ -577,8 +584,9 @@ public class MainWindow extends JFrame {
         // Tab 2: Side-by-Side Charts
         tabs.addTab("Side-by-Side Charts", createSideBySideChartsPanel(result));
         
-        // Tab 3: Long Running (from these 2 dumps)
-        tabs.addTab("Long Running", createLongRunningForTwoDumpsPanel(result.getBaseline(), result.getCompareTo()));
+        // Tab 3: Long Running + Persistent (from these 2 dumps)
+        tabs.addTab("Long Running + Persistent", 
+            createLongRunningForTwoDumpsPanel(result.getBaseline(), result.getCompareTo()));
         
         // Tab 4: State Delta Table
         String[] deltaCols = {"State", "Baseline", "Compare", "Delta"};
@@ -717,44 +725,90 @@ public class MainWindow extends JFrame {
         return chartPanel;
     }
     
-    // ===== LONG RUNNING FOR 2 DUMPS =====
+    // ===== LONG RUNNING + PERSISTENT FOR 2 DUMPS =====
     private JPanel createLongRunningForTwoDumpsPanel(ThreadDump base, ThreadDump compare) {
         JPanel panel = new JPanel(new BorderLayout(10, 10));
         panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         
         List<ThreadDump> twoDumps = Arrays.asList(base, compare);
         List<ThreadInfo> longRunning = DumpAnalyzer.findLongRunningThreads(twoDumps);
+        List<ThreadInfo> persistent = DumpAnalyzer.findPersistentThreadsByTid(twoDumps);
+        
+        // Info header
+        JPanel headerPanel = new JPanel(new GridLayout(3, 1, 5, 5));
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 10, 5));
         
         JLabel infoLabel = new JLabel(
-            "Long-running threads: RUNNABLE in BOTH dumps with identical top stack frame (TID-based). " +
-            "Detected: " + longRunning.size());
-        infoLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-        panel.add(infoLabel, BorderLayout.NORTH);
+            "<html><b>Long-running threads:</b> " + longRunning.size() + 
+            " — RUNNABLE in BOTH dumps with identical top stack frame (TID-based).</html>");
+        JLabel persistLabel = new JLabel(
+            "<html><b>Persistent threads:</b> " + persistent.size() + 
+            " — Present in BOTH dumps (any state, matched by TID).</html>");
+        JLabel noteLabel = new JLabel(
+            "<html><i>Note: All long-running threads are also persistent. Persistent threads may be idle or blocked.</i></html>");
+        noteLabel.setFont(new Font(Font.DIALOG, Font.ITALIC, 11));
         
-        String[] columns = {"TID", "Name", "Pool", "Top Method", "Stack Depth"};
-        DefaultTableModel model = new DefaultTableModel(columns, 0) {
+        headerPanel.add(infoLabel);
+        headerPanel.add(persistLabel);
+        headerPanel.add(noteLabel);
+        panel.add(headerPanel, BorderLayout.NORTH);
+        
+        // Two sections: Long Running at top, Persistent at bottom
+        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
+        
+        // Top: Long Running
+        String[] lrCols = {"TID", "Name", "Pool", "Top Method", "Stack Depth"};
+        DefaultTableModel lrModel = new DefaultTableModel(lrCols, 0) {
             @Override public boolean isCellEditable(int row, int column) { return false; }
         };
-        
         for (ThreadInfo thread : longRunning) {
             String topMethod = thread.getStackTrace().isEmpty() ? "N/A" :
                 thread.getStackTrace().get(0).toString();
-            model.addRow(new Object[]{
-                thread.getId(),
-                thread.getName(),
-                thread.getPoolName(),
-                topMethod,
-                thread.getStackTrace().size()
+            lrModel.addRow(new Object[]{
+                thread.getId(), thread.getName(), thread.getPoolName(),
+                topMethod, thread.getStackTrace().size()
             });
         }
+        JTable lrTable = new JTable(lrModel);
+        lrTable.setAutoCreateRowSorter(true);
+        lrTable.setRowHeight(25);
+        JPanel lrPanel = new JPanel(new BorderLayout());
+        lrPanel.add(new JLabel("Long Running Threads (RUNNABLE + same top frame in both dumps)", SwingConstants.CENTER), BorderLayout.NORTH);
+        lrPanel.add(new JScrollPane(lrTable), BorderLayout.CENTER);
         
-        JTable table = new JTable(model);
-        table.setAutoCreateRowSorter(true);
-        table.setRowHeight(25);
-        panel.add(new JScrollPane(table), BorderLayout.CENTER);
+        // Bottom: Persistent (excluding those already in Long Running)
+        Set<Long> longRunningTids = longRunning.stream().map(ThreadInfo::getId).collect(Collectors.toSet());
+        List<ThreadInfo> persistentOnly = persistent.stream()
+            .filter(t -> !longRunningTids.contains(t.getId()))
+            .collect(Collectors.toList());
         
-        if (longRunning.isEmpty()) {
-            JLabel noneLabel = new JLabel("No long-running threads detected between these two dumps.", SwingConstants.CENTER);
+        String[] pCols = {"TID", "Name", "Pool", "State", "Top Method"};
+        DefaultTableModel pModel = new DefaultTableModel(pCols, 0) {
+            @Override public boolean isCellEditable(int row, int column) { return false; }
+        };
+        for (ThreadInfo thread : persistentOnly) {
+            String topMethod = thread.getStackTrace().isEmpty() ? "N/A" :
+                thread.getStackTrace().get(0).toString();
+            pModel.addRow(new Object[]{
+                thread.getId(), thread.getName(), thread.getPoolName(),
+                thread.getState().getLabel(), topMethod
+            });
+        }
+        JTable pTable = new JTable(pModel);
+        pTable.setAutoCreateRowSorter(true);
+        pTable.setRowHeight(25);
+        JPanel pPanel = new JPanel(new BorderLayout());
+        pPanel.add(new JLabel("Persistent Threads (present in both dumps, any state)", SwingConstants.CENTER), BorderLayout.NORTH);
+        pPanel.add(new JScrollPane(pTable), BorderLayout.CENTER);
+        
+        splitPane.setTopComponent(lrPanel);
+        splitPane.setBottomComponent(pPanel);
+        splitPane.setResizeWeight(0.5);
+        
+        panel.add(splitPane, BorderLayout.CENTER);
+        
+        if (longRunning.isEmpty() && persistent.isEmpty()) {
+            JLabel noneLabel = new JLabel("No long-running or persistent threads detected between these two dumps.", SwingConstants.CENTER);
             noneLabel.setFont(new Font(Font.DIALOG, Font.ITALIC, 14));
             panel.add(noneLabel, BorderLayout.SOUTH);
         }
@@ -815,30 +869,19 @@ public class MainWindow extends JFrame {
         summary.setEditable(false);
         summary.setLineWrap(true);
         summary.setWrapStyleWord(true);
-        summary.setText(DumpAnalyzer.generateMultiSummary(result));
+        
+        // Timing validation
+        String timingWarning = DumpAnalyzer.validateDumpTiming(result.getDumps());
+        StringBuilder summaryText = new StringBuilder();
+        if (!timingWarning.isEmpty()) {
+            summaryText.append(timingWarning).append("\n");
+        }
+        summaryText.append(DumpAnalyzer.generateMultiSummary(result));
+        summary.setText(summaryText.toString());
         tabs.addTab("Summary", new JScrollPane(summary));
         
-        // Persistent threads tab
-        String[] cols = {"TID", "Name", "State", "Pool"};
-        DefaultTableModel model = new DefaultTableModel(cols, 0);
-        for (ThreadInfo t : result.getPersistentThreads()) {
-            model.addRow(new Object[]{t.getId(), t.getName(), t.getState().getLabel(), 
-                t.getPoolName()});
-        }
-        tabs.addTab("Persistent Threads (" + result.getPersistentThreads().size() + ")", 
-            new JScrollPane(new JTable(model)));
-        
-        // Long-running threads tab
-        String[] lrCols = {"TID", "Name", "Pool", "Top Method", "Stack Depth"};
-        DefaultTableModel lrModel = new DefaultTableModel(lrCols, 0);
-        for (ThreadInfo t : result.getLongRunningThreads()) {
-            String topMethod = t.getStackTrace().isEmpty() ? "N/A" :
-                t.getStackTrace().get(0).toString();
-            lrModel.addRow(new Object[]{t.getId(), t.getName(), t.getPoolName(), 
-                topMethod, t.getStackTrace().size()});
-        }
-        tabs.addTab("Long Running (" + result.getLongRunningThreads().size() + ")", 
-            new JScrollPane(new JTable(lrModel)));
+        // Long Running + Persistent tab (combined)
+        tabs.addTab("Long Running + Persistent", createMultiLongRunningPersistentPanel(result));
         
         // State transitions tab
         String[] transCols = {"TID", "Thread Name", "From State", "To State", "Dump Index", "Pool"};
@@ -856,6 +899,95 @@ public class MainWindow extends JFrame {
         
         dialog.add(tabs);
         dialog.setVisible(true);
+    }
+    
+    private JPanel createMultiLongRunningPersistentPanel(MultiComparisonResult result) {
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        
+        List<ThreadInfo> longRunning = result.getLongRunningThreads();
+        List<ThreadInfo> persistent = result.getPersistentThreads();
+        
+        // Info header
+        JPanel headerPanel = new JPanel(new GridLayout(3, 1, 5, 5));
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 10, 5));
+        
+        JLabel infoLabel = new JLabel(
+            "<html><b>Long-running threads:</b> " + longRunning.size() + 
+            " — RUNNABLE in ALL dumps with identical top stack frame (TID-based).</html>");
+        JLabel persistLabel = new JLabel(
+            "<html><b>Persistent threads:</b> " + persistent.size() + 
+            " — Present in ALL dumps (any state, matched by TID).</html>");
+        JLabel noteLabel = new JLabel(
+            "<html><i>Note: All long-running threads are also persistent. Persistent threads may be idle or blocked.</i></html>");
+        noteLabel.setFont(new Font(Font.DIALOG, Font.ITALIC, 11));
+        
+        headerPanel.add(infoLabel);
+        headerPanel.add(persistLabel);
+        headerPanel.add(noteLabel);
+        panel.add(headerPanel, BorderLayout.NORTH);
+        
+        // Two sections: Long Running at top, Persistent at bottom
+        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
+        
+        // Top: Long Running
+        String[] lrCols = {"TID", "Name", "Pool", "Top Method", "Stack Depth"};
+        DefaultTableModel lrModel = new DefaultTableModel(lrCols, 0) {
+            @Override public boolean isCellEditable(int row, int column) { return false; }
+        };
+        for (ThreadInfo thread : longRunning) {
+            String topMethod = thread.getStackTrace().isEmpty() ? "N/A" :
+                thread.getStackTrace().get(0).toString();
+            lrModel.addRow(new Object[]{
+                thread.getId(), thread.getName(), thread.getPoolName(),
+                topMethod, thread.getStackTrace().size()
+            });
+        }
+        JTable lrTable = new JTable(lrModel);
+        lrTable.setAutoCreateRowSorter(true);
+        lrTable.setRowHeight(25);
+        JPanel lrPanel = new JPanel(new BorderLayout());
+        lrPanel.add(new JLabel("Long Running Threads (RUNNABLE + same top frame in all dumps)", SwingConstants.CENTER), BorderLayout.NORTH);
+        lrPanel.add(new JScrollPane(lrTable), BorderLayout.CENTER);
+        
+        // Bottom: Persistent (excluding those already in Long Running)
+        Set<Long> longRunningTids = longRunning.stream().map(ThreadInfo::getId).collect(Collectors.toSet());
+        List<ThreadInfo> persistentOnly = persistent.stream()
+            .filter(t -> !longRunningTids.contains(t.getId()))
+            .collect(Collectors.toList());
+        
+        String[] pCols = {"TID", "Name", "Pool", "State", "Top Method"};
+        DefaultTableModel pModel = new DefaultTableModel(pCols, 0) {
+            @Override public boolean isCellEditable(int row, int column) { return false; }
+        };
+        for (ThreadInfo thread : persistentOnly) {
+            String topMethod = thread.getStackTrace().isEmpty() ? "N/A" :
+                thread.getStackTrace().get(0).toString();
+            pModel.addRow(new Object[]{
+                thread.getId(), thread.getName(), thread.getPoolName(),
+                thread.getState().getLabel(), topMethod
+            });
+        }
+        JTable pTable = new JTable(pModel);
+        pTable.setAutoCreateRowSorter(true);
+        pTable.setRowHeight(25);
+        JPanel pPanel = new JPanel(new BorderLayout());
+        pPanel.add(new JLabel("Persistent Threads (present in all dumps, any state)", SwingConstants.CENTER), BorderLayout.NORTH);
+        pPanel.add(new JScrollPane(pTable), BorderLayout.CENTER);
+        
+        splitPane.setTopComponent(lrPanel);
+        splitPane.setBottomComponent(pPanel);
+        splitPane.setResizeWeight(0.5);
+        
+        panel.add(splitPane, BorderLayout.CENTER);
+        
+        if (longRunning.isEmpty() && persistent.isEmpty()) {
+            JLabel noneLabel = new JLabel("No long-running or persistent threads detected across all dumps.", SwingConstants.CENTER);
+            noneLabel.setFont(new Font(Font.DIALOG, Font.ITALIC, 14));
+            panel.add(noneLabel, BorderLayout.SOUTH);
+        }
+        
+        return panel;
     }
     
     private JPanel createStateHistoryChart(MultiComparisonResult result) {
@@ -919,9 +1051,11 @@ public class MainWindow extends JFrame {
     
     private void showAbout() {
         JOptionPane.showMessageDialog(this,
-            "Sherlock Thread Dump Analyzer v2.1\n" +
+            "Sherlock Thread Dump Analyzer v2.2\n" +
             "TID-based cross-dump comparison\n" +
             "Side-by-side comparative charts\n" +
+            "Long Running + Persistent thread detection\n" +
+            "Dump timing validation (20s minimum)\n" +
             "Actionable analysis reports (no raw dump text)\n" +
             "Charts: Thread States, Stack Depth, Name Groups, Pool Distribution\n" +
             "Supports: HotSpot JDK 8/11/21, WebLogic, WebSphere, Tomcat\n" +
