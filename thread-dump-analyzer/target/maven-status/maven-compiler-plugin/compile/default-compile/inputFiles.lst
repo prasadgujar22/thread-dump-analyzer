@@ -1,0 +1,13 @@
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/parser/WebSphereParser.java
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/analysis/DumpAnalyzer.java
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/model/ThreadDump.java
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/model/DeadlockInfo.java
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/gui/MainWindow.java
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/parser/ThreadDumpParser.java
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/model/ComparisonResult.java
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/parser/WebLogicParser.java
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/parser/HotSpotParser.java
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/model/ThreadState.java
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/model/ThreadInfo.java
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/ThreadDumpAnalyzer.java
+/root/.openclaw/workspace/thread-dump-analyzer/src/main/java/com/sherlock/tda/model/MultiComparisonResult.java
